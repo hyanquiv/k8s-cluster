@@ -1,33 +1,49 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "==> Actualizando sistema..."
+echo "==> [1/5] Actualizando sistema..."
 sudo apt-get update -y
 sudo apt-get upgrade -y
 
-echo "==> Instalando dependencias..."
+echo "==> [2/5] Instalando dependencias..."
 sudo apt-get install -y \
-    curl wget git apt-transport-https \
-    ca-certificates gnupg lsb-release software-properties-common
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release \
+    software-properties-common
 
-echo "==> Instalando Docker..."
-curl -fsSL https://get.docker.com | sh
+echo "==> [3/5] Instalando Docker CE..."
+# Agregar repositorio oficial de Docker
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get update -y
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Agregar tu usuario al grupo docker
 sudo usermod -aG docker $USER
-newgrp docker <<EONG
-echo "Docker instalado: $(docker --version)"
-EONG
 
-echo "==> Instalando kubectl..."
-curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-chmod +x kubectl
-sudo mv kubectl /usr/local/bin/
-echo "kubectl instalado: $(kubectl version --client --output=yaml | grep gitVersion)"
+echo "==> [4/5] Instalando Kubernetes (kubectl, kubeadm, kubelet)..."
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
 
-echo "==> Instalando k3s (servidor o agente según el rol)"
-# ⚠️ Si esta máquina es el MASTER
-# curl -sfL https://get.k3s.io | sh -
+sudo apt-get update -y
+sudo apt-get install -y kubelet kubeadm kubectl
+sudo apt-mark hold kubelet kubeadm kubectl
 
-# ⚠️ Si esta máquina es un AGENTE, reemplazar <MASTER_IP> y <TOKEN>
-# curl -sfL https://get.k3s.io | K3S_URL=https://<MASTER_IP>:6443 K3S_TOKEN=<TOKEN> sh -
+echo "==> [5/5] Deshabilitar swap (requerido por kubelet)..."
+sudo swapoff -a
+sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
 
-echo "==> Instalación base completada."
+echo "==> Instalación completada ✅"
+echo ""
+echo "Ahora en el nodo master ejecuta:"
+echo "  sudo kubeadm init --pod-network-cidr=10.244.0.0/16"
+echo ""
+echo "En cada worker, ejecuta el comando 'kubeadm join ...' que te dará el master."
